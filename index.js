@@ -7,10 +7,18 @@ require("dotenv").config();
 // ------------------------------------------------------------
 // Vérification de la variable d'environnement
 // ------------------------------------------------------------
-try {
-  let raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+let serviceAccount;
 
-  // Si la variable est encodée en Base64, on la décode
+try {
+  let raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+
+  if (!raw) {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT est absente.");
+  }
+
+  raw = raw.trim();
+
+  // Si la variable est en Base64, on la décode
   if (!raw.startsWith("{")) {
     raw = Buffer.from(raw, "base64").toString("utf8");
   }
@@ -21,16 +29,6 @@ try {
   console.error(err);
   process.exit(1);
 }
-let serviceAccount;
-
-try {
-  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-} catch (err) {
-  console.error("❌ FIREBASE_SERVICE_ACCOUNT n'est pas un JSON valide.");
-  console.error(err);
-  process.exit(1);
-}
-
 // ------------------------------------------------------------
 // Initialisation Firebase Admin
 // ------------------------------------------------------------
