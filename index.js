@@ -1,127 +1,184 @@
-// Serveur Node/Express pour l'envoi de notifications FCM.
-// Même principe que le serveur Render déjà utilisé pour Huinest Food.
-// À déployer séparément (Render, Railway...) — les tokens FCM ne peuvent
-// PAS être envoyés depuis le navigateur, il faut une clé de compte de
-// service (service account) côté serveur.
+const express = require("express");
+const cors = require("cors");
+const admin = require("firebase-admin");
+const cron = require("node-cron");
+require("dotenv").config();
 
-const express = require('express');
-const cors = require('cors');
-const admin = require('firebase-admin');
-const cron = require('node-cron');
-require('dotenv').config();
+// ------------------------------------------------------------
+// Vérification de la variable d'environnement
+// ------------------------------------------------------------
+if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+  console.error("❌ FIREBASE_SERVICE_ACCOUNT est introuvable !");
+  console.error(
+    "Ajoutez cette variable dans Render > Environment puis redeployez."
+  );
+  process.exit(1);
+}
 
-// --- Initialisation Firebase Admin ---
-// Récupérez le fichier JSON de clé de compte de service depuis :
-// Firebase Console > Paramètres du projet > Comptes de service > Générer une nouvelle clé privée
-// Collez son contenu (en une seule ligne) dans la variable d'env FIREBASE_SERVICE_ACCOUNT.
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+let serviceAccount;
 
+try {
+  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} catch (err) {
+  console.error("❌ FIREBASE_SERVICE_ACCOUNT n'est pas un JSON valide.");
+  console.error(err);
+  process.exit(1);
+}
+
+// ------------------------------------------------------------
+// Initialisation Firebase Admin
+// ------------------------------------------------------------
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
+console.log("✅ Firebase Admin initialisé.");
+
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-// --------------------------------------------------------------
-// POST /api/register-token
-// Abonne le jeton FCM d'un appareil à un ou plusieurs topics.
-// Appelé côté client juste après l'obtention du token (voir messaging.ts).
-// --------------------------------------------------------------
-app.post('/api/register-token', async (req, res) => {
+// ------------------------------------------------------------
+// Enregistrer un token FCM
+// ------------------------------------------------------------
+app.post("/api/register-token", async (req, res) => {
   const { uid, token, topics } = req.body;
 
   if (!token || !Array.isArray(topics) || topics.length === 0) {
-    return res.status(400).json({ error: 'token et topics (tableau) sont requis.' });
+    return res.status(400).json({
+      error: "token et topics sont requis.",
+    });
   }
 
   try {
     for (const topic of topics) {
       await admin.messaging().subscribeToTopic(token, topic);
     }
-    console.log(`Token abonné (uid=${uid || 'inconnu'}) aux topics: ${topics.join(', ')}`);
-    res.json({ success: true });
+
+    console.log(
+      `✅ Token ${uid || "inconnu"} abonné : ${topics.join(", ")}`
+    );
+
+    res.json({
+      success: true,
+    });
   } catch (err) {
-    console.error('Erreur abonnement topic:', err);
-    res.status(500).json({ error: 'Échec de l\'abonnement au topic.' });
+    console.error(err);
+
+    res.status(500).json({
+      error: "Erreur abonnement.",
+    });
   }
 });
 
-// --------------------------------------------------------------
-// POST /api/send-notification
-// Envoie une notification à un topic (ex: "all-members").
-// Appelé depuis le Cockpit Admin (AdminDashboard.tsx).
-// --------------------------------------------------------------
-app.post('/api/send-notification', async (req, res) => {
+// ------------------------------------------------------------
+// Envoyer une notification
+// ------------------------------------------------------------
+app.post("/api/send-notification", async (req, res) => {
   const { title, body, topic } = req.body;
 
   if (!title || !body || !topic) {
-    return res.status(400).json({ error: 'title, body et topic sont requis.' });
+    return res.status(400).json({
+      error: "title, body et topic sont requis.",
+    });
   }
 
   try {
     const messageId = await admin.messaging().send({
       topic,
-      notification: { title, body },
+      notification: {
+        title,
+        body,
+      },
       webpush: {
         notification: {
-          icon: '/assets/logo.jpg',
+          icon: "/assets/logo.jpg",
         },
       },
     });
-    console.log(`Notification envoyée (${messageId}) au topic "${topic}"`);
-    res.json({ success: true, messageId });
+
+    console.log("✅ Notification envoyée :", messageId);
+
+    res.json({
+      success: true,
+      messageId,
+    });
   } catch (err) {
-    console.error('Erreur envoi notification:', err);
-    res.status(500).json({ error: 'Échec de l\'envoi de la notification.' });
+    console.error(err);
+
+    res.status(500).json({
+      error: "Erreur envoi notification.",
+    });
   }
 });
 
-// --------------------------------------------------------------
-// Rappels automatiques programmés (heure d'Abidjan = GMT, pas de décalage DST)
-// Adaptez les horaires/jours si votre programme change.
-// --------------------------------------------------------------
-function sendReminder(title, body, topic = 'all-members') {
-  admin.messaging()
-    .send({ topic, notification: { title, body } })
-    .then(id => console.log(`Rappel auto envoyé (${id}): ${title}`))
-    .catch(err => console.error('Erreur rappel auto:', err));
+// ------------------------------------------------------------
+// Fonction rappel automatique
+// ------------------------------------------------------------
+async function sendReminder(title, body, topic = "all-members") {
+  try {
+    const id = await admin.messaging().send({
+      topic,
+      notification: {
+        title,
+        body,
+      },
+    });
+
+    console.log("✅ Rappel envoyé :", id);
+  } catch (err) {
+    console.error(err);
+  }
 }
 
-// Mercredi 17h30 GMT — rappel culte d'enseignement (18h30)
-cron.schedule('30 17 * * 3', () => {
+// Mercredi
+cron.schedule("30 17 * * 3", () => {
   sendReminder(
-    'Culte d\'enseignement dans 1h',
-    'Rendez-vous à 18h30 à l\'Auditorium Central. Ne manquez pas ce temps de doctrine !'
+    "Culte d'enseignement dans 1h",
+    "Rendez-vous à 18h30 à l'Auditorium Central."
   );
 });
 
-// Vendredi 21h00 GMT — rappel veillée de combat spirituel (22h00)
-cron.schedule('0 21 * * 5', () => {
+// Vendredi
+cron.schedule("0 21 * * 5", () => {
   sendReminder(
-    'Grande veillée ce soir dans 1h',
-    'La veillée de combat spirituel débute à 22h00 jusqu\'à 02h00. Préparez votre cœur !'
+    "Grande veillée dans 1h",
+    "Début à 22h00 jusqu'à 02h00."
   );
 });
 
-// Dimanche 07h00 GMT — rappel culte d'impact (08h00)
-cron.schedule('0 7 * * 0', () => {
+// Dimanche
+cron.schedule("0 7 * * 0", () => {
   sendReminder(
-    'Culte du dimanche dans 1h',
-    'Le culte d\'impact et de miracles commence à 08h00. Venez nombreux !'
+    "Culte du dimanche dans 1h",
+    "Le culte débute à 08h00."
   );
 });
 
-// Lundi 09h00 GMT — bilan hebdomadaire (exemple, à enrichir avec de vraies stats Firestore)
-cron.schedule('0 9 * * 1', () => {
+// Lundi
+cron.schedule("0 9 * * 1", () => {
   sendReminder(
-    'Bilan de la semaine — Christ Army',
-    'Consultez le résumé des activités, enrôlements et enseignements publiés la semaine dernière.'
+    "Bilan hebdomadaire",
+    "Consultez les activités de la semaine."
   );
 });
 
+// ------------------------------------------------------------
+// Route de test
+// ------------------------------------------------------------
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    status: "Serveur Christ Army opérationnel",
+  });
+});
+
+// ------------------------------------------------------------
+// Démarrage
+// ------------------------------------------------------------
 const PORT = process.env.PORT || 4000;
+
 app.listen(PORT, () => {
-  console.log(`Serveur de notifications Christ Army démarré sur le port ${PORT}`);
+  console.log(`🚀 Serveur démarré sur le port ${PORT}`);
 });
