@@ -7,14 +7,20 @@ require("dotenv").config();
 // ------------------------------------------------------------
 // Vérification de la variable d'environnement
 // ------------------------------------------------------------
-if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-  console.error("❌ FIREBASE_SERVICE_ACCOUNT est introuvable !");
-  console.error(
-    "Ajoutez cette variable dans Render > Environment puis redeployez."
-  );
+try {
+  let raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+
+  // Si la variable est encodée en Base64, on la décode
+  if (!raw.startsWith("{")) {
+    raw = Buffer.from(raw, "base64").toString("utf8");
+  }
+
+  serviceAccount = JSON.parse(raw);
+} catch (err) {
+  console.error("❌ Impossible de lire FIREBASE_SERVICE_ACCOUNT.");
+  console.error(err);
   process.exit(1);
 }
-
 let serviceAccount;
 
 try {
